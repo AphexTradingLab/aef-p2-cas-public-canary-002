@@ -1,0 +1,185 @@
+name: Synthetic CAS single-run race
+
+on:
+  workflow_dispatch:
+    inputs:
+      base_sha:
+        description: Full immutable seed commit SHA on cas-synthetic-001
+        required: true
+        type: string
+
+permissions:
+  contents: read
+  actions: read
+
+concurrency:
+  group: p2-cas-synthetic-001
+  cancel-in-progress: false
+
+jobs:
+  writer_a:
+    name: writer-a
+    runs-on: ubuntu-24.04
+    timeout-minutes: 3
+    permissions:
+      contents: write
+      actions: read
+    outputs:
+      outcome: ${{ steps.race.outputs.outcome }}
+      push_start_utc: ${{ steps.race.outputs.push_start_utc }}
+      push_end_utc: ${{ steps.race.outputs.push_end_utc }}
+      runner_id: ${{ steps.race.outputs.runner_id }}
+      runner_name: ${{ steps.race.outputs.runner_name }}
+      candidate_sha: ${{ steps.race.outputs.candidate_sha }}
+      base_sha: ${{ steps.race.outputs.base_sha }}
+      parent_sha: ${{ steps.race.outputs.parent_sha }}
+      base_digest: ${{ steps.race.outputs.base_digest }}
+      candidate_state_sha256: ${{ steps.race.outputs.candidate_state_sha256 }}
+      operation_id: ${{ steps.race.outputs.operation_id }}
+      event_id: ${{ steps.race.outputs.event_id }}
+      push_attempts: ${{ steps.race.outputs.push_attempts }}
+      push_return_code: ${{ steps.race.outputs.push_return_code }}
+    steps:
+      - name: Fetch immutable workflow source
+        shell: bash
+        run: |
+          set -euo pipefail
+          git init .
+          git remote add origin "https://github.com/$GITHUB_REPOSITORY.git"
+          git fetch --no-tags origin refs/heads/main
+          test "$(git rev-parse FETCH_HEAD)" = "$GITHUB_SHA"
+          git checkout --detach FETCH_HEAD
+      - name: Prepare sibling commit
+        id: prepare
+        shell: bash
+        env:
+          BASE_SHA: ${{ inputs.base_sha }}
+          RUN_ID: ${{ github.run_id }}
+          REPO: ${{ github.repository }}
+        run: python3 scripts/cas_worker.py prepare --repo "$REPO" --base-sha "$BASE_SHA" --run-id "$RUN_ID" --writer writer-a
+      - name: Race push window
+        id: race
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          BASE_SHA: ${{ inputs.base_sha }}
+          PARENT_SHA: ${{ steps.prepare.outputs.parent_sha }}
+          BASE_DIGEST: ${{ steps.prepare.outputs.base_digest }}
+          CANDIDATE_SHA: ${{ steps.prepare.outputs.candidate_sha }}
+          CANDIDATE_STATE_SHA256: ${{ steps.prepare.outputs.candidate_state_sha256 }}
+          OPERATION_ID: ${{ steps.prepare.outputs.operation_id }}
+          EVENT_ID: ${{ steps.prepare.outputs.event_id }}
+          REPO: ${{ github.repository }}
+          RUN_ID: ${{ github.run_id }}
+        run: python3 scripts/cas_worker.py race --repo "$REPO" --run-id "$RUN_ID" --writer writer-a --base-sha "$BASE_SHA" --parent-sha "$PARENT_SHA" --base-digest "$BASE_DIGEST" --candidate-sha "$CANDIDATE_SHA" --candidate-state-sha256 "$CANDIDATE_STATE_SHA256" --operation-id "$OPERATION_ID" --event-id "$EVENT_ID"
+
+  writer_b:
+    name: writer-b
+    runs-on: ubuntu-24.04
+    timeout-minutes: 3
+    permissions:
+      contents: write
+      actions: read
+    outputs:
+      outcome: ${{ steps.race.outputs.outcome }}
+      push_start_utc: ${{ steps.race.outputs.push_start_utc }}
+      push_end_utc: ${{ steps.race.outputs.push_end_utc }}
+      runner_id: ${{ steps.race.outputs.runner_id }}
+      runner_name: ${{ steps.race.outputs.runner_name }}
+      candidate_sha: ${{ steps.race.outputs.candidate_sha }}
+      base_sha: ${{ steps.race.outputs.base_sha }}
+      parent_sha: ${{ steps.race.outputs.parent_sha }}
+      base_digest: ${{ steps.race.outputs.base_digest }}
+      candidate_state_sha256: ${{ steps.race.outputs.candidate_state_sha256 }}
+      operation_id: ${{ steps.race.outputs.operation_id }}
+      event_id: ${{ steps.race.outputs.event_id }}
+      push_attempts: ${{ steps.race.outputs.push_attempts }}
+      push_return_code: ${{ steps.race.outputs.push_return_code }}
+    steps:
+      - name: Fetch immutable workflow source
+        shell: bash
+        run: |
+          set -euo pipefail
+          git init .
+          git remote add origin "https://github.com/$GITHUB_REPOSITORY.git"
+          git fetch --no-tags origin refs/heads/main
+          test "$(git rev-parse FETCH_HEAD)" = "$GITHUB_SHA"
+          git checkout --detach FETCH_HEAD
+      - name: Prepare sibling commit
+        id: prepare
+        shell: bash
+        env:
+          BASE_SHA: ${{ inputs.base_sha }}
+          RUN_ID: ${{ github.run_id }}
+          REPO: ${{ github.repository }}
+        run: python3 scripts/cas_worker.py prepare --repo "$REPO" --base-sha "$BASE_SHA" --run-id "$RUN_ID" --writer writer-b
+      - name: Race push window
+        id: race
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          BASE_SHA: ${{ inputs.base_sha }}
+          PARENT_SHA: ${{ steps.prepare.outputs.parent_sha }}
+          BASE_DIGEST: ${{ steps.prepare.outputs.base_digest }}
+          CANDIDATE_SHA: ${{ steps.prepare.outputs.candidate_sha }}
+          CANDIDATE_STATE_SHA256: ${{ steps.prepare.outputs.candidate_state_sha256 }}
+          OPERATION_ID: ${{ steps.prepare.outputs.operation_id }}
+          EVENT_ID: ${{ steps.prepare.outputs.event_id }}
+          REPO: ${{ github.repository }}
+          RUN_ID: ${{ github.run_id }}
+        run: python3 scripts/cas_worker.py race --repo "$REPO" --run-id "$RUN_ID" --writer writer-b --base-sha "$BASE_SHA" --parent-sha "$PARENT_SHA" --base-digest "$BASE_DIGEST" --candidate-sha "$CANDIDATE_SHA" --candidate-state-sha256 "$CANDIDATE_STATE_SHA256" --operation-id "$OPERATION_ID" --event-id "$EVENT_ID"
+
+  reconciler:
+    name: reconciler
+    needs: [writer_a, writer_b]
+    if: always()
+    runs-on: ubuntu-24.04
+    timeout-minutes: 3
+    permissions:
+      contents: read
+      actions: read
+    steps:
+      - name: Fetch immutable workflow source
+        shell: bash
+        run: |
+          set -euo pipefail
+          git init .
+          git remote add origin "https://github.com/$GITHUB_REPOSITORY.git"
+          git fetch --no-tags origin refs/heads/main
+          test "$(git rev-parse FETCH_HEAD)" = "$GITHUB_SHA"
+          git checkout --detach FETCH_HEAD
+      - name: Reconcile remote ref and evidence
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          BASE_SHA: ${{ inputs.base_sha }}
+          MAIN_SHA: ${{ github.sha }}
+          WRITER_A_OUTCOME: ${{ needs.writer_a.outputs.outcome }}
+          WRITER_A_PUSH_START_UTC: ${{ needs.writer_a.outputs.push_start_utc }}
+          WRITER_A_PUSH_END_UTC: ${{ needs.writer_a.outputs.push_end_utc }}
+          WRITER_A_RUNNER_ID: ${{ needs.writer_a.outputs.runner_id }}
+          WRITER_A_RUNNER_NAME: ${{ needs.writer_a.outputs.runner_name }}
+          WRITER_A_CANDIDATE_SHA: ${{ needs.writer_a.outputs.candidate_sha }}
+          WRITER_A_BASE_SHA: ${{ needs.writer_a.outputs.base_sha }}
+          WRITER_A_PARENT_SHA: ${{ needs.writer_a.outputs.parent_sha }}
+          WRITER_A_BASE_DIGEST: ${{ needs.writer_a.outputs.base_digest }}
+          WRITER_A_CANDIDATE_STATE_SHA256: ${{ needs.writer_a.outputs.candidate_state_sha256 }}
+          WRITER_A_OPERATION_ID: ${{ needs.writer_a.outputs.operation_id }}
+          WRITER_A_EVENT_ID: ${{ needs.writer_a.outputs.event_id }}
+          WRITER_A_PUSH_ATTEMPTS: ${{ needs.writer_a.outputs.push_attempts }}
+          WRITER_A_PUSH_RETURN_CODE: ${{ needs.writer_a.outputs.push_return_code }}
+          WRITER_B_OUTCOME: ${{ needs.writer_b.outputs.outcome }}
+          WRITER_B_PUSH_START_UTC: ${{ needs.writer_b.outputs.push_start_utc }}
+          WRITER_B_PUSH_END_UTC: ${{ needs.writer_b.outputs.push_end_utc }}
+          WRITER_B_RUNNER_ID: ${{ needs.writer_b.outputs.runner_id }}
+          WRITER_B_RUNNER_NAME: ${{ needs.writer_b.outputs.runner_name }}
+          WRITER_B_CANDIDATE_SHA: ${{ needs.writer_b.outputs.candidate_sha }}
+          WRITER_B_BASE_SHA: ${{ needs.writer_b.outputs.base_sha }}
+          WRITER_B_PARENT_SHA: ${{ needs.writer_b.outputs.parent_sha }}
+          WRITER_B_BASE_DIGEST: ${{ needs.writer_b.outputs.base_digest }}
+          WRITER_B_CANDIDATE_STATE_SHA256: ${{ needs.writer_b.outputs.candidate_state_sha256 }}
+          WRITER_B_OPERATION_ID: ${{ needs.writer_b.outputs.operation_id }}
+          WRITER_B_EVENT_ID: ${{ needs.writer_b.outputs.event_id }}
+          WRITER_B_PUSH_ATTEMPTS: ${{ needs.writer_b.outputs.push_attempts }}
+          WRITER_B_PUSH_RETURN_CODE: ${{ needs.writer_b.outputs.push_return_code }}
+        run: python3 scripts/cas_worker.py reconcile
