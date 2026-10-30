@@ -1,0 +1,1 @@
+{"authority":"NONE","continuation_decision":null,"dispatch_status":"NONE","event_id":null,"execution_authorized":false,"execution_id":"synthetic-execution-002","operation_id":null,"outbox_write":false,"previous_state_sha256":null,"proposal":"synthetic-seed","revision":0,"schema":"p2.synthetic.cas.v1","writer_id":null}
